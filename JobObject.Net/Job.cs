@@ -60,8 +60,6 @@ namespace Stormancer.JobManagement
 
 
             basicLimits.LimitFlags = (uint)flags;
-            
-            extendedInfo.BasicLimitInformation = basicLimits;
 
             int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
             IntPtr extendedInfoPtr = Marshal.AllocHGlobal(length);
