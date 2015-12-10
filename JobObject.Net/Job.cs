@@ -15,12 +15,6 @@ namespace Stormancer.JobManagement
         private const int WS_POPUP = unchecked((int)0x80000000);
         private const int HWND_MESSAGE = -3;
 
-
-
-
-
-     
-
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr CreateJobObject(IntPtr a, string lpName);
 
@@ -66,6 +60,8 @@ namespace Stormancer.JobManagement
 
 
             basicLimits.LimitFlags = (uint)flags;
+            
+            extendedInfo.BasicLimitInformation = basicLimits;
 
             int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
             IntPtr extendedInfoPtr = Marshal.AllocHGlobal(length);
@@ -148,7 +144,7 @@ namespace Stormancer.JobManagement
     #region Helper classes
 
     [StructLayout(LayoutKind.Sequential)]
-    struct IO_COUNTERS
+    internal class IO_COUNTERS
     {
         public UInt64 ReadOperationCount;
         public UInt64 WriteOperationCount;
@@ -168,7 +164,7 @@ namespace Stormancer.JobManagement
 
     }
     [StructLayout(LayoutKind.Sequential)]
-    struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    internal class JOBOBJECT_BASIC_LIMIT_INFORMATION
     {
         public Int64 PerProcessUserTimeLimit;
         public Int64 PerJobUserTimeLimit;
@@ -182,7 +178,7 @@ namespace Stormancer.JobManagement
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct SECURITY_ATTRIBUTES
+    internal class SECURITY_ATTRIBUTES
     {
         public UInt32 nLength;
         public IntPtr lpSecurityDescriptor;
@@ -190,7 +186,7 @@ namespace Stormancer.JobManagement
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    internal class JOBOBJECT_EXTENDED_LIMIT_INFORMATION
     {
         public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
         public IO_COUNTERS IoInfo;
@@ -200,13 +196,14 @@ namespace Stormancer.JobManagement
         public UIntPtr PeakJobMemoryUsed;
     }
 
-    struct JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
+    [StructLayout(LayoutKind.Sequential)]
+    internal class JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
     {
         public UInt32 ControlFlags;
         public UInt32 CpuRate;
 
     }
-    public enum JobObjectInfoType
+    internal enum JobObjectInfoType
     {
         AssociateCompletionPortInformation = 7,
         BasicLimitInformation = 2,
