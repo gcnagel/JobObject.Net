@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -6,19 +7,10 @@ namespace Stormancer.JobManagement
 {
     public class Job : IDisposable
     {
-        private const int JobObjectExtendedLimitInformation = 9;
-        private const int CREATE_SUSPENDED = 0x00000004;
-
-        private const int INFINITE = -1;
-        private const int GWL_STYLE = -16;
-        private const int WS_CHILD = 0x40000000;
-        private const int WS_POPUP = unchecked((int)0x80000000);
-        private const int HWND_MESSAGE = -3;
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern IntPtr CreateJobObject(IntPtr a, string lpName);
 
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool SetInformationJobObject(IntPtr hJob, JobObjectInfoType infoType, IntPtr lpJobObjectInfo, UInt32 cbJobObjectInfoLength);
 
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -30,13 +22,39 @@ namespace Stormancer.JobManagement
         public Job()
         {
             handle = CreateJobObject(IntPtr.Zero, null);
+            if (handle == IntPtr.Zero)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Job object already exists.");
+            }
+
             UpdateMemoryLimit(null, null, null);
+        }
 
+        ~Job()
+        {
+            Dispose(false);
+        }
 
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (disposed)
+                return;
+
+            Interop.CloseHandle(handle);
+            handle = IntPtr.Zero;
+            disposed = true;
         }
 
         public void UpdateMemoryLimit(uint? minPrcWorkingSet, uint? maxPrcWorkingSet, uint? maxJobVirtualMemory)
         {
+            if (disposed) throw new ObjectDisposedException("Job is already disposed.");
+
             var flags = JOBOBJECT_BASIC_LIMIT_FLAGS.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             var basicLimits = new JOBOBJECT_BASIC_LIMIT_INFORMATION();
             var extendedInfo = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
@@ -52,26 +70,30 @@ namespace Stormancer.JobManagement
 
             }
 
-            if(maxJobVirtualMemory.HasValue)
+            if (maxJobVirtualMemory.HasValue)
             {
                 flags |= JOBOBJECT_BASIC_LIMIT_FLAGS.JOB_OBJECT_LIMIT_JOB_MEMORY;
                 extendedInfo.JobMemoryLimit = (UIntPtr)maxJobVirtualMemory.Value;
             }
 
-
             basicLimits.LimitFlags = (uint)flags;
+            
+            extendedInfo.BasicLimitInformation = basicLimits;
 
             int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
             IntPtr extendedInfoPtr = Marshal.AllocHGlobal(length);
-            Marshal.StructureToPtr(extendedInfo, extendedInfoPtr, false);
-
-            if (!SetInformationJobObject(handle, JobObjectInfoType.ExtendedLimitInformation, extendedInfoPtr, (uint)length))
+            try
+            {
+                Marshal.StructureToPtr(extendedInfo, extendedInfoPtr, false);
+                if (!SetInformationJobObject(handle, JobObjectInfoType.ExtendedLimitInformation, extendedInfoPtr, (uint)length))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to set extended job information.");
+                }
+            }
+            finally
             {
                 Marshal.FreeHGlobal(extendedInfoPtr);
-                throw new Exception(string.Format("Unable to set extended information.  Error: {0}", Marshal.GetLastWin32Error()));
             }
-            Marshal.FreeHGlobal(extendedInfoPtr);
-
         }
 
         /// <summary>
@@ -80,6 +102,8 @@ namespace Stormancer.JobManagement
         /// <param name="value">The limit in total CPU percent.</param>
         public void UpdateCpuRateLimit(double value)
         {
+            if (disposed) throw new ObjectDisposedException("Job is already disposed.");
+
             var cpuRateInfo = new JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
             {
                 ControlFlags = 1 | 4,
@@ -87,56 +111,37 @@ namespace Stormancer.JobManagement
             };
             var length = Marshal.SizeOf(typeof(JOBOBJECT_CPU_RATE_CONTROL_INFORMATION));
             IntPtr cpuRateInfoPtr = Marshal.AllocHGlobal(length);
-            Marshal.StructureToPtr(cpuRateInfo, cpuRateInfoPtr, false);
-            if (!SetInformationJobObject(handle, JobObjectInfoType.JobObjectCpuRateControlInformation, cpuRateInfoPtr, (uint)length))
+            try
+            {
+                Marshal.StructureToPtr(cpuRateInfo, cpuRateInfoPtr, false);
+                if (!SetInformationJobObject(handle, JobObjectInfoType.JobObjectCpuRateControlInformation, cpuRateInfoPtr, (uint)length))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to set cpu rate job information.");
+                }
+            }
+            finally
             {
                 Marshal.FreeHGlobal(cpuRateInfoPtr);
-                throw new Exception(string.Format("Unable to set cpu rate information.  Error: {0}", Marshal.GetLastWin32Error()));
-
             }
-            Marshal.FreeHGlobal(cpuRateInfoPtr);
-
         }
-        public void Dispose()
+
+        public void AddProcess(IntPtr processHandle)
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            if (!AssignProcessToJobObject(handle, processHandle))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to add process to JobObject.");
+            }
         }
 
-        private void Dispose(bool disposing)
+        public void AddProcess(int processId)
         {
-            if (disposed)
-                return;
-
-            if (disposing) { }
-
-            Close();
-            disposed = true;
+            AddProcess(Process.GetProcessById(processId));
         }
 
-        public void Close()
+        public void AddProcess(Process process)
         {
-            Interop.CloseHandle(handle);
-            handle = IntPtr.Zero;
+            AddProcess(process.Handle);
         }
-
-        public bool AddProcess(IntPtr processHandle)
-        {
-            return AssignProcessToJobObject(handle, processHandle);
-        }
-
-        public bool AddProcess(int processId)
-        {
-            return AddProcess(System.Diagnostics.Process.GetProcessById(processId));
-        }
-
-        public bool AddProcess(System.Diagnostics.Process process)
-        {
-            return AddProcess(process.Handle);
-        }
-
-       
-
     }
 
     #region Helper classes
@@ -201,6 +206,7 @@ namespace Stormancer.JobManagement
         public UInt32 CpuRate;
 
     }
+
     internal enum JobObjectInfoType
     {
         AssociateCompletionPortInformation = 7,
